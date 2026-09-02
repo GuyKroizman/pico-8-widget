@@ -273,7 +273,9 @@ def row_to_cart(row):
 
     tags = {str(tag).lower() for tag in (row[18] or []) if tag}
     haystack = (title + " " + cart_id).lower()
-    if "wip" in tags or "wip" in haystack or "work in progress" in haystack:
+    words = re.split(r"[^a-z0-9]+", haystack)
+    # "wip" only counts as a whole word: "Wipeout" or "wipper" must pass.
+    if "wip" in tags or "wip" in words or "work in progress" in haystack:
         return None  # unfinished carts never get recommended
 
     return {
@@ -358,7 +360,7 @@ def refresh_pool(force=False):
 def extract_description(html_text):
     """Pull the first-post description text out of a cart's BBS page."""
     page = re.sub(
-        r"(?is)<script.*?</script>|<style.*?</style>|<textarea.*?</textarea>",
+        r"(?is)<script.*?</script>|<style.*?</style>|<textarea.*?</textarea>|<!--.*?-->",
         " ",
         html_text,
     )

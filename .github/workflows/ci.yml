@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov radon
+
+      - name: Run unit tests
+        run: python -m pytest tests -q
+
+      - name: Run tests with coverage
+        run: |
+          python -m pytest tests --cov=p8 --cov-report=json:coverage.json \
+            --cov-report=term-missing -q
+
+      - name: CRAP gate (complexity vs. coverage)
+        run: python tools/crap_gate.py --source p8.py --coverage-file coverage.json --threshold 30

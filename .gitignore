@@ -1,2 +1,8 @@
+# Python
 __pycache__/
 *.pyc
+
+# Test & coverage artifacts
+.pytest_cache/
+.coverage
+coverage.json

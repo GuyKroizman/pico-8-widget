@@ -37,7 +37,7 @@ There are three separate locations, and it's worth keeping them straight:
 
 | Location | Purpose |
 |---|---|
-| `/home/guy/code/pico-8-widget/` | **Source repo** (this folder, git). The code you edit. |
+| `~/code/pico-8-widget/` (or wherever you keep this repo) | **Source repo** (this folder, git). The code you edit. |
 | `~/.config/omarchy/plugins/guy.pico-8-widget/` | **Runtime plugin dir**. A *symlink to the repo* — the Omarchy shell only loads plugins from here (the folder name must match the `id` in `manifest.json`). |
 | `~/.local/share/guy.pico-8-widget/` | **User data** (pool, cache, bookmarks, covers). Never touched by updates; safe to delete to start over. |
 
@@ -113,12 +113,58 @@ rm -rf ~/.local/share/guy.pico-8-widget
 The pool, picks and bookmarks are gone; the widget rebuilds the pool from
 scratch on its next refresh.
 
+## Testing & CI
+
+The Python layer (`p8.py` — parser, WIP filter, deterministic pick,
+bookmarks, pruning) is fully unit-tested **offline**: `p8.fetch` is mocked,
+so the suite never touches the network or the Lexaloffle site. Real BBS
+markup lives in `tests/fixtures/` (slimmed-down copies of listing pages and
+cart pages).
+
+```
+tests/
+  conftest.py            # isolated temp data dir per test, frozen clock, mock fetch
+  fixtures/              # listing page + modern/embed-disabled cart pages
+  test_parser.py         # pdat blob parsing + WIP/cart filtering
+  test_extract.py        # description extraction & cleanup
+  test_pool.py           # refresh, pruning, cover deletion, detail/thumb caching
+  test_pick.py           # determinism, rolls, state restore, failure resilience
+  test_favorites.py      # bookmarks
+  test_fetch.py          # retry + pacing behaviour
+  test_cli.py            # command-line entry point
+```
+
+Run everything locally (any python3 with pytest/pytest-cov/radon):
+
+```sh
+python -m pytest tests -q                        # the unit suite
+python -m pytest tests --cov=p8 --cov-report=term-missing -q   # coverage
+python -m pytest --cov=p8 --cov-report=json:coverage.json -q   # report for the gate
+python tools/crap_gate.py --threshold 30         # CRAP gate (exits non-zero on failure)
+```
+
+**What the CRAP gate does:** CRAP (Change Risk Anti-Patterns) =
+`complexity² × (1 − coverage)³ + complexity`, per function. A function only
+scores over the default threshold of 30 when it is both complex *and*
+under-covered — so the gate pushes you to either simplify a function or
+cover it. Every function in `p8.py` currently passes with ~96% total line
+coverage.
+
+**GitHub Actions** (`.github/workflows/ci.yml`) runs on every push and pull
+request: installs the tooling on Python 3.12, runs the unit tests, collects
+coverage, and fails if the CRAP gate trips. The QML popup is *not* covered by
+CI — Quickshell needs a Wayland session, so UI changes still need a manual
+check on a real Omarchy box (see the reload notes above).
+
 ## Layout
 
 ```
 manifest.json       plugin manifest (id: guy.pico-8-widget, kind: bar-widget)
 Pico8Games.qml      bar icon + popup (Omarchy Panel / Quickshell QML)
 p8.py               data helper (python3, stdlib only) — fetch, pick, cache
+tests/              offline unit tests + BBS fixtures (see "Testing & CI")
+tools/crap_gate.py  CRAP metric gate for CI
+.github/workflows/  GitHub Actions CI
 README.md
 ```
 
