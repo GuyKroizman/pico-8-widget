@@ -188,22 +188,6 @@ coverage, and fails if the CRAP gate trips. The QML popup is *not* covered by
 CI — Quickshell needs a Wayland session, so UI changes still need a manual
 check on a real Omarchy box (see the reload notes above).
 
-## Publishing to the Omarchy plugin marketplace
-
-The community registry lives at [plugins.omarchy.org](https://plugins.omarchy.org/)
-(backed by the [omarchy-plugin-marketplace](https://github.com/omacom/omarchy-plugin-marketplace)
-repo). Listing is three steps:
-
-1. **Repository** — this repo: public, with a valid `manifest.json` at the
-   root, a README, and a license.
-2. **Manifest** — already present; validate with `omarchy plugin validate .`.
-3. **Submit** — open the marketplace's [issue form](https://github.com/omacom/omarchy-plugin-marketplace/issues)
-   with the repository link, a category and tags. Automated validation checks
-   the latest commit before a maintainer approves the listing.
-
-The marketplace validates listings, not plugin security — plugins run
-unsandboxed in the shell, so keep the code reviewable.
-
 ## Layout
 
 ```
@@ -213,6 +197,7 @@ p8.py               data helper (python3, stdlib only) — fetch, pick, cache
 tests/              offline unit tests + BBS fixtures (see "Testing & CI")
 tools/crap_gate.py  CRAP metric gate for CI
 .github/workflows/  GitHub Actions CI
+PUBLISHING.md       how to list this plugin on the Omarchy marketplace
 README.md
 LICENSE
 ```
