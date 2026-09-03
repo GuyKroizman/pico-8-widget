@@ -1,16 +1,61 @@
-# PICO-8 Widget — a daily game in your bar
+# PICO-8 Widget
 
-An Omarchy bar widget that recommends one PICO-8 game per day.
+> An Omarchy bar widget that puts a PICO-8 game on your desktop every day.
 
-The bar shows a single gamepad icon. Click it to see today's game — cover
-image, title and description — with a clear **Open in browser** link (the
-cover and title are clickable too), plus:
+A single gamepad icon sits in the bar. Click it and you get today's
+recommendation — cover image, title and description — with a clear
+**Open in browser** link that takes you straight to the game on
+[lexaloffle.com](https://www.lexaloffle.com/bbs/?cat=7#sub=2&mode=carts),
+where it plays in your browser.
 
-- **♥** bookmark the game so you can come back to it later
-- **↻** roll another game for today
+## Features
 
-Right-click the icon for your saved games (a plain list; tap one to open it).
-Bookmarks never influence the daily pick — they're just games you liked.
+- **One game per day** — a deterministic, calendar-seeded pick from a pool of
+  games the widget has collected for you. Stable all day and across restarts.
+- **No unfinished work** — "WIP" carts are filtered out before they ever
+  enter the pool.
+- **Bookmarks** — heart a game to save it; right-click the icon for your list
+  of saved games (tap one to open it). Bookmarks never influence the pick.
+- **Roll another** — the ↻ button swaps today's game for a different one.
+- **Light on the site** — a handful of requests a day, everything cached
+  forever.
+
+## Requirements
+
+- Omarchy (Quattro-era shell)
+- `python3` on `PATH` (stdlib only — no dependencies)
+
+## Installation
+
+The widget is a standard Omarchy shell plugin, installed from git:
+
+```sh
+omarchy plugin add https://github.com/GuyKroizman/pico-8-widget.git --enable
+```
+
+The installer asks where to place it (left / center / right of the bar).
+Move it later any time:
+
+```sh
+omarchy bar move guy.pico-8-widget --section right
+```
+
+Verify it is loaded:
+
+```sh
+omarchy plugin list | grep pico
+```
+
+To uninstall:
+
+```sh
+omarchy plugin remove guy.pico-8-widget --yes
+rm -rf ~/.local/share/guy.pico-8-widget   # optional: delete its data too
+```
+
+> Installing from git clones the repo into `~/.config/omarchy/plugins/` — no
+> symlinks needed for regular use. See [Development](#development) for how to
+> hack on it.
 
 ## How the recommendation works
 
@@ -28,31 +73,63 @@ this:
 3. **On demand** — when a game is picked, its BBS page is fetched once for
    the description and its cover is downloaded once; both are cached forever.
 
-WIP ("work in progress") carts are filtered out by tag and title before they
-ever enter the pool, so you never get handed a half-finished demo.
+## Data & storage
 
-## Where the code lives — the development cycle
+All persistent state lives under your XDG data dir in
+`~/.local/share/guy.pico-8-widget/`:
 
-There are three separate locations, and it's worth keeping them straight:
+| File | Contents | Typical size |
+|---|---|---|
+| `pool.json` | the cart pool: metadata for every cart ever seen, plus cached descriptions for picked ones | ~300 B per cart, ~1–2 MB at the 2500 cap |
+| `state.json` | today's pick, roll counter, recent picks, last refresh date | < 1 KB |
+| `favs.json` | your bookmarks | < 1 KB (only exists after the first bookmark) |
+| `thumbs/` | downloaded cover images, one PNG per cart | ~15 KB each |
 
-| Location | Purpose |
-|---|---|
-| `~/code/pico-8-widget/` (or wherever you keep this repo) | **Source repo** (this folder, git). The code you edit. |
-| `~/.config/omarchy/plugins/guy.pico-8-widget/` | **Runtime plugin dir**. A *symlink to the repo* — the Omarchy shell only loads plugins from here (the folder name must match the `id` in `manifest.json`). |
-| `~/.local/share/guy.pico-8-widget/` | **User data** (pool, cache, bookmarks, covers). Never touched by updates; safe to delete to start over. |
+For context: after the first day of use (a pool of ~75 carts) the whole
+folder is roughly 100–200 KB — most of it the downloaded covers.
 
-The bar itself is configured in `~/.config/omarchy/shell.json`
-(`bar.layout.*`), which is where the widget's placement lives.
+### Growth model
 
-### Editing and reloading
+- The pool gains ~40–80 new carts per day (two lucky pages) until it hits
+  the **2500-cart cap**, at which point the oldest non-bookmarked carts are
+  dropped every day. Bookmarked carts and their covers are never dropped.
+- Covers of dropped carts are deleted too, so `thumbs/` stays bounded at
+  ~2500 files: roughly **40 MB worst case**, typically far less.
+- Network use is ~3–4 requests/day once the pool is warm: two lucky pages,
+  plus the picked cart's description page (~200 KB) and cover (~15 KB) when
+  it hasn't been cached. Requests are paced at ≥ 0.9 s apart and everything
+  fetched once is cached forever.
+
+### Starting over
 
 ```sh
-# 1. edit files in the repo, then sanity-check
+rm -rf ~/.local/share/guy.pico-8-widget
+```
+
+The pool, picks and bookmarks are gone; the widget rebuilds the pool from
+scratch on its next refresh.
+
+## Development
+
+The plugin's layout mirrors what `omarchy plugin add` clones into
+`~/.config/omarchy/plugins/`, so you can develop straight from a clone of
+this repo (folder name must match the `id` in `manifest.json`):
+
+```sh
+# from this repo
+ln -s "$PWD" ~/.config/omarchy/plugins/guy.pico-8-widget
+omarchy-shell shell rescanPlugins
+```
+
+Then add `{ "id": "guy.pico-8-widget" }` to a section in `bar.layout.*` in
+`~/.config/omarchy/shell.json`.
+
+Edit → sanity-check → reload:
+
+```sh
 python3 -m py_compile p8.py          # helper script
 omarchy plugin validate .            # manifest/QML wiring
-
-# 2. load the changes into the running shell
-omarchy restart shell                # dependable, applies everything
+omarchy restart shell                # dependable reload (also applies shell.json)
 ```
 
 Notes:
@@ -67,51 +144,6 @@ Notes:
 - Watch for QML errors after a change:
   `journalctl --user -f | grep -iE 'qml|pico'`
 - Check the shell sees the plugin: `omarchy plugin list`.
-
-### Installing elsewhere / publishing
-
-The repo is laid out exactly like an installed plugin, so `omarchy plugin add`
-can clone it straight into place on any machine (no symlink needed):
-
-```sh
-omarchy plugin add https://github.com/you/pico-8-widget.git --enable
-```
-
-## Data & storage
-
-All persistent state is in `~/.local/share/guy.pico-8-widget/`:
-
-| File | Contents | Typical size |
-|---|---|---|
-| `pool.json` | the cart pool: metadata for every cart ever seen, plus cached descriptions for picked ones | ~300 B per cart, ~1–2 MB at the 2500 cap |
-| `state.json` | today's pick, roll counter, recent picks, last refresh date | < 1 KB |
-| `favs.json` | your bookmarks | < 1 KB (only exists after the first bookmark) |
-| `thumbs/` | downloaded cover images, one PNG per cart | ~15 KB each |
-
-On this machine after the first day (76 carts in the pool) the whole folder
-is ~130 KB — `pool.json` ≈ 27 KB and six covers ≈ 96 KB.
-
-### Growth model
-
-- The pool gains ~40–80 new carts per day (two lucky pages) until it hits
-  the **2500-cart cap**, at which point the oldest non-bookmarked carts are
-  dropped every day. Bookmarked carts and their covers are never dropped.
-- Covers of dropped carts are deleted too, so `thumbs/` stays bounded at
-  ~2500 files: roughly **40 MB worst case**, typically far less.
-- Descriptions add ~1–4 KB per entry, only for carts that were picked.
-- Network use is ~3–4 requests/day once the pool is warm: two lucky pages,
-  plus the picked cart's description page (~200 KB) and cover (~15 KB) when
-  it hasn't been cached. Requests are paced at ≥ 0.9 s apart and everything
-  fetched once is cached forever.
-
-### Starting over
-
-```sh
-rm -rf ~/.local/share/guy.pico-8-widget
-```
-
-The pool, picks and bookmarks are gone; the widget rebuilds the pool from
-scratch on its next refresh.
 
 ## Testing & CI
 
@@ -156,6 +188,22 @@ coverage, and fails if the CRAP gate trips. The QML popup is *not* covered by
 CI — Quickshell needs a Wayland session, so UI changes still need a manual
 check on a real Omarchy box (see the reload notes above).
 
+## Publishing to the Omarchy plugin marketplace
+
+The community registry lives at [plugins.omarchy.org](https://plugins.omarchy.org/)
+(backed by the [omarchy-plugin-marketplace](https://github.com/omacom/omarchy-plugin-marketplace)
+repo). Listing is three steps:
+
+1. **Repository** — this repo: public, with a valid `manifest.json` at the
+   root, a README, and a license.
+2. **Manifest** — already present; validate with `omarchy plugin validate .`.
+3. **Submit** — open the marketplace's [issue form](https://github.com/omacom/omarchy-plugin-marketplace/issues)
+   with the repository link, a category and tags. Automated validation checks
+   the latest commit before a maintainer approves the listing.
+
+The marketplace validates listings, not plugin security — plugins run
+unsandboxed in the shell, so keep the code reviewable.
+
 ## Layout
 
 ```
@@ -166,6 +214,7 @@ tests/              offline unit tests + BBS fixtures (see "Testing & CI")
 tools/crap_gate.py  CRAP metric gate for CI
 .github/workflows/  GitHub Actions CI
 README.md
+LICENSE
 ```
 
 `p8.py` can also be used from a terminal:
@@ -186,3 +235,9 @@ python3 p8.py favorite remove 158939
   fetched.
 - Descriptions are scraped from the BBS pages and lightly cleaned; some old
   carts or carts that disallow embedding will show a short or empty text.
+- *PICO-8 is a trademark of Lexaloffle Games LLP; this widget is an
+  unofficial community project and is not affiliated with Lexaloffle.*
+
+## License
+
+[MIT](LICENSE)

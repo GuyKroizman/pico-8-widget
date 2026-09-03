@@ -3,7 +3,7 @@
   "id": "guy.pico-8-widget",
   "name": "PICO-8 Widget",
   "version": "1.0.0",
-  "author": "guy",
+  "author": "Guy Kroizman",
   "description": "A daily PICO-8 game in the bar: cover, description and a link to play it on lexaloffle.com. Bookmark games you want to come back to.",
   "kinds": [
     "bar-widget"
