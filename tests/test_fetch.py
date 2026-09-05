@@ -24,14 +24,14 @@ def test_fetch_retries_then_succeeds(monkeypatch):
 
     def flaky(request, timeout=None):
         calls["n"] += 1
-        if calls["n"] < 3:
+        if calls["n"] < p8.REQUEST_RETRIES:  # fail on every attempt but the last
             raise OSError("connection reset")
         return _Response(b"ok")
 
     monkeypatch.setattr(p8.urllib.request, "urlopen", flaky)
     monkeypatch.setattr(p8.time, "sleep", lambda _s: None)  # no real waiting
     assert p8.fetch("https://example.test/x") == b"ok"
-    assert calls["n"] == 3
+    assert calls["n"] == p8.REQUEST_RETRIES
 
 
 def test_fetch_gives_up_after_retries(monkeypatch):

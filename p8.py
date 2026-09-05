@@ -48,8 +48,8 @@ TID_URL = BASE + "/bbs/?tid={tid}"
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) p8-daily-widget/1.0"
 REQUEST_GAP = 0.9      # minimum seconds between network requests
-REQUEST_TIMEOUT = 25   # seconds before a request is abandoned
-REQUEST_RETRIES = 3    # attempts per URL before giving up
+REQUEST_TIMEOUT = 10   # seconds before a request is abandoned
+REQUEST_RETRIES = 2    # attempts per URL before giving up
 POOL_CAP = 2500        # max carts remembered at once
 RECENT_MAX = 30        # picks remembered so they are not repeated too soon
 DESC_MAX = 6000        # description length cap, in characters

@@ -130,9 +130,11 @@ Panel {
   }
 
   // A hung helper (bad network) would otherwise block the queue forever.
+  // Bumped past p8.py's worst case (description + cover fetches, each up to
+  // ~2 attempts x 10s) so slow sites fail in p8.py, not here.
   Timer {
     id: watchdog
-    interval: 25000
+    interval: 60000
     onTriggered: {
       if (p8Proc.running) p8Proc.running = false // onRunningChanged finishes the job
     }
@@ -142,18 +144,51 @@ Panel {
   // data commands
   // ------------------------------------------------------------------
 
+  // Retry state for loadToday: failed lookups are retried a couple of times
+  // a few seconds apart so a single slow response doesn't surface as
+  // "offline" (the BBS occasionally stalls connections).
+  // Retry state for loadToday: failed lookups are retried a couple of times
+  // a few seconds apart so a single slow response doesn't surface as
+  // "offline" (the BBS occasionally stalls connections). retryRoll is a var
+  // because "undefined" means "restore today's pick" (no explicit roll).
+  property var retryRoll: undefined
+  property int retryLeft: 0
+
+  Timer {
+    id: retryTimer
+    interval: 4000
+    onTriggered: {
+      root.message = "Looking for today's game…"
+      root.loadToday(root.retryRoll, root.retryLeft)
+    }
+  }
+
+  function scheduleRetry(rollArg, remaining) {
+    root.retryRoll = rollArg
+    root.retryLeft = remaining
+    retryTimer.restart()
+  }
+
   function refreshPool() {
     run(["python3", root.helperPath, "refresh"], function(result) {
-      root.busy = false
-      if (!result || !result.ok) root.message = "PICO-8 is offline — will retry."
+      // Never clears busy here: a loadToday queued behind this refresh owns
+      // the busy flag, and clobbering it would let a second load start.
+      if (!result || !result.ok) {
+        if (root.gameTid === 0) root.message = "Couldn't reach lexaloffle.com…"
+      }
     })
   }
 
   // With no argument, restores today's pick from disk (stable across shell
   // restarts); with a roll number, explicitly picks that roll (the ↻ button).
-  function loadToday(explicitRoll) {
+  // Failures retry automatically `retries` times before showing the offline
+  // message, so a first click usually needs no second one.
+  function loadToday(explicitRoll, retries) {
+    if (root.busy) return
+    if (retries === undefined || retries === null) retries = 2
+    retryTimer.stop()
     root.busy = true
-    root.message = ""
+    root.message = root.gameTid === 0 ? "Looking for today's game…" : ""
     var args = ["python3", root.helperPath, "pick"]
     if (explicitRoll !== undefined && explicitRoll !== null) {
       args.push("--roll", String(explicitRoll))
@@ -171,10 +206,15 @@ Panel {
         root.message = ""
         root.refreshFavorites()
       } else if (result && result.error === "pool empty") {
+        // First run ever: warm the pool, then retry the pick once it is there.
         root.message = "Building the game pool…"
-        root.refreshPool() // first run ever: pick follows once the pool is warm
+        root.refreshPool()
+        if (retries > 0) root.scheduleRetry(explicitRoll, retries - 1)
+      } else if (retries > 0) {
+        root.message = "Couldn't reach lexaloffle.com — retrying…"
+        root.scheduleRetry(explicitRoll, retries - 1)
       } else {
-        root.message = "PICO-8 is offline — will retry."
+        root.message = "PICO-8 is offline — click to try again."
       }
     })
   }
@@ -375,6 +415,15 @@ Panel {
             font.bold: true
             font.underline: true
           }
+        }
+
+        // Manual retry once the automatic attempts are exhausted.
+        Button {
+          visible: root.gameTid === 0 && root.message === "PICO-8 is offline — click to try again."
+          text: "Try again"
+          foreground: root.barForeground
+          fontFamily: root.uiFontFamily
+          onClicked: root.loadToday()
         }
 
         // Description, scrollable when long, hidden when absent.
