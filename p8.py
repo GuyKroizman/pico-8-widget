@@ -143,7 +143,8 @@ def fetch(url):
         if wait > 0:
             time.sleep(wait)
         try:
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+            # Fixed https URLs only, from our own constants (B310 not applicable).
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:  # nosec B310
                 body = response.read()
             _last_request_at = time.time()
             return body
@@ -177,15 +178,15 @@ def _bare(s, i):
     j = i
     while j < len(s) and s[j] not in ",] \t\r\n":
         j += 1
-    token = s[i:j].strip()
-    if token == "":
+    piece = s[i:j].strip()
+    if piece == "":
         return "", j
-    if re.fullmatch(r"-?\d+", token):
-        return int(token), j
+    if re.fullmatch(r"-?\d+", piece):
+        return int(piece), j
     try:
-        return float(token), j
+        return float(piece), j
     except ValueError:
-        return token, j
+        return piece, j
 
 
 def _string(s, i):
@@ -485,7 +486,8 @@ def compute_pick(roll=None):
                 save_json(state_file(), state)
                 return None
 
-            chosen = random.Random(f"{today}#{roll}").choice(fresh)
+            # Seeded deterministic pick, not security-sensitive (B311 not applicable).
+            chosen = random.Random(f"{today}#{roll}").choice(fresh)  # nosec B311
             tid = int(chosen["tid"])
             recent = [tid] + [int(t) for t in state.get("recent", [])]
             state["pick"] = {"date": today, "roll": roll, "tid": tid}

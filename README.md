@@ -1,6 +1,7 @@
 # PICO-8 Widget
 
 [![CI](https://github.com/GuyKroizman/pico-8-widget/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GuyKroizman/pico-8-widget/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/GuyKroizman/pico-8-widget/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/GuyKroizman/pico-8-widget/security/code-scanning)
 
 > An Omarchy bar widget that puts a PICO-8 game on your desktop every day.
 
