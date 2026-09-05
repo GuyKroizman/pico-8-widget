@@ -1,0 +1,5 @@
+[tool.mutmut]
+source_paths = ["p8.py"]
+runner = "python -m pytest -q"
+pytest_add_cli_args_test_selection = ["tests"]
+cache_invalidation_files = ["tests/"]

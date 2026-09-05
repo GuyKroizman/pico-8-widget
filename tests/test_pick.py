@@ -106,6 +106,26 @@ def test_pick_output_shape(fixed_today, fake_fetch):
     assert result["pool_size"] == 5
 
 
+def test_pick_is_golden(fixed_today):
+    """Golden test: for a fixed pool and date, the seeded pick is fully
+    deterministic down to the exact game. Guards the seed string, the sort
+    order and the choice mechanism against accidental changes."""
+    seed_pool(5)
+    assert pick_tid(p8.compute_pick(0)) == 3
+    assert pick_tid(p8.compute_pick(1)) == 2
+    assert pick_tid(p8.compute_pick(2)) == 1
+
+
+def test_path_helpers(fixed_today):
+    """Pure path helpers must keep their file names (kills trivial string
+    mutations in them)."""
+    assert p8.pool_file().endswith("pool.json")
+    assert p8.state_file().endswith("state.json")
+    assert p8.favs_file().endswith("favs.json")
+    assert p8.thumbs_dir().endswith("thumbs")
+    assert p8.pool_file().startswith(str(p8.DATA_DIR))
+
+
 def test_cached_pick_resyncs_stale_last_roll(fixed_today):
     seed_pool(5)
     # state says roll 2 / tid 3 but last_roll drifted; an explicit roll 2

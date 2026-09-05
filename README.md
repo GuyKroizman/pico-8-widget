@@ -185,11 +185,28 @@ under-covered — so the gate pushes you to either simplify a function or
 cover it. Every function in `p8.py` currently passes with ~96% total line
 coverage.
 
-**GitHub Actions** (`.github/workflows/ci.yml`) runs on every push and pull
-request: installs the tooling on Python 3.12, runs the unit tests, collects
-coverage, and fails if the CRAP gate trips. The QML popup is *not* covered by
-CI — Quickshell needs a Wayland session, so UI changes still need a manual
-check on a real Omarchy box (see the reload notes above).
+**Mutation testing** (`.github/workflows/mutation.yml`): line coverage only
+proves code *ran*; mutation testing proves tests would *fail* if the code
+misbehaved. mutmut applies ~1150 small mutations to `p8.py` and re-runs the
+suite for each; the current score is ~79% (killed + timeout over all
+non-skipped mutants). The CI gate fails below 75% — survivors are mostly
+equivalent mutants (no behavior change, unkillable) and defensive/error
+paths; real gaps it exposes should be fixed with tests, not by loosening the
+gate. Run locally:
+
+```sh
+python tools/mutation_gate.py --threshold 75
+```
+
+(Results are cached in `./mutants/`, gitignored; delete it to force a full
+run after changing tests.)
+
+**GitHub Actions** runs on every push and pull request: the main CI job
+installs the tooling on Python 3.12, runs the unit tests, collects coverage,
+and fails if the CRAP gate trips; a second job runs the mutation gate; a
+third runs CodeQL weekly. The QML popup is *not* covered by any of them —
+Quickshell needs a Wayland session, so UI changes still need a manual check
+on a real Omarchy box (see the reload notes above).
 
 ## Layout
 
@@ -197,9 +214,11 @@ check on a real Omarchy box (see the reload notes above).
 manifest.json       plugin manifest (id: guy.pico-8-widget, kind: bar-widget)
 Pico8Games.qml      bar icon + popup (Omarchy Panel / Quickshell QML)
 p8.py               data helper (python3, stdlib only) — fetch, pick, cache
+pyproject.toml      mutmut (mutation testing) configuration
 tests/              offline unit tests + BBS fixtures (see "Testing & CI")
 tools/crap_gate.py  CRAP metric gate for CI
-.github/workflows/  GitHub Actions CI
+tools/mutation_gate.py  mutation-score gate for CI
+.github/workflows/  GitHub Actions CI (tests, mutation, CodeQL)
 PUBLISHING.md       how to list this plugin on the Omarchy marketplace
 README.md
 LICENSE
