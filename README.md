@@ -1,5 +1,7 @@
 # PICO-8 Widget
 
+[![CI](https://github.com/GuyKroizman/pico-8-widget/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GuyKroizman/pico-8-widget/actions/workflows/ci.yml)
+
 > An Omarchy bar widget that puts a PICO-8 game on your desktop every day.
 
 A single gamepad icon sits in the bar. Click it and you get today's
