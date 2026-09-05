@@ -29,6 +29,7 @@ Network etiquette (the site is a small hobby server):
 
 import fcntl
 import html
+import html.parser
 import json
 import os
 import random
@@ -358,32 +359,81 @@ def refresh_pool(force=False):
 # cart detail: description + cover (fetched once, cached forever)
 # ---------------------------------------------------------------------------
 
+# Containers whose content must never reach the description text. They are
+# removed *structurally* (via html.parser), not with regexes: regex tag
+# filtering is bypassable (CodeQL py/bad-tag-filter), and the parser handles
+# weird spellings like "</script >" and nesting correctly.
+_SKIP_CONTAINERS = {"script", "style", "textarea"}
+
+
+class _TextExtractor(html.parser.HTMLParser):
+    """Turns page HTML into text with one newline per tag boundary.
+
+    Mirrors the old "replace every tag with a newline" behaviour, except that
+    the content of script/style/textarea blocks and HTML comments is dropped
+    structurally instead of by regex. Charrefs are kept raw so the single
+    html.unescape() pass downstream behaves exactly as before.
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.parts = []
+        self._skip_depth = 0
+
+    def _newline(self):
+        self.parts.append("\n")
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _SKIP_CONTAINERS:
+            self._skip_depth += 1
+        self._newline()
+
+    def handle_startendtag(self, tag, attrs):
+        if tag not in _SKIP_CONTAINERS:
+            self._newline()  # <br/> and friends
+
+    def handle_endtag(self, tag):
+        if tag in _SKIP_CONTAINERS and self._skip_depth > 0:
+            self._skip_depth -= 1
+        self._newline()
+
+    def handle_data(self, data):
+        if self._skip_depth == 0:
+            self.parts.append(data)
+
+    def handle_comment(self, data):
+        pass  # comments are dropped entirely
+
+    def handle_entityref(self, name):
+        self.parts.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self.parts.append(f"&#{name};")
+
+
 def extract_description(html_text):
     """Pull the first-post description text out of a cart's BBS page."""
-    page = re.sub(
-        r"(?is)<script.*?</script>|<style.*?</style>|<textarea.*?</textarea>|<!--.*?-->",
-        " ",
-        html_text,
-    )
-
-    # Everything before the comments anchor belongs to the opening post.
-    cut = page.find("id=comments")
+    # Everything before the comments anchor belongs to the opening post; the
+    # cut happens on the raw page because "id=comments" is an HTML attribute.
+    cut = html_text.find("id=comments")
     if cut >= 0:
-        page = page[:cut]
-
-    # The embed/code instruction ends the player chrome, and the description
-    # paragraphs come right after it. Newer pages always carry this marker;
-    # older ones (or carts that disallow embedding) don't, so fall back to
-    # the whole region and filter chrome lines out below.
-    marker = page.rfind("Copy and paste the snippet below")
-    if marker >= 0:
-        page = page[marker:]
+        html_text = html_text[:cut]
 
     # Tag chips: <a ...#tag=...><span class="tag">...</span></a>
-    page = re.sub(r"(?is)<a[^>]*#tag=[^>]*>.*?</a>", " ", page)
+    html_text = re.sub(r"(?is)<a[^>]*#tag=[^>]*>.*?</a>", " ", html_text)
+
+    # Structural extraction: scripts/styles/textareas/comments are dropped by
+    # the parser; every remaining tag becomes a line break. The player chrome
+    # before the description is cut later on the parsed text, at the
+    # "Copy and paste the snippet below" line (searching the raw page for that
+    # marker is unreliable: it can appear inside an HTML comment).
+    extractor = _TextExtractor()
+    extractor.feed(html_text)
+    extractor.close()
+    page_text = html.unescape("".join(extractor.parts))
 
     lines = []
-    for line in html.unescape(re.sub(r"<[^>]+>", "\n", page)).splitlines():
+    for line in page_text.splitlines():
         line = " ".join(line.split())
         if line:
             lines.append(line)

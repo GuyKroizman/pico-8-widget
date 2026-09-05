@@ -47,3 +47,31 @@ def test_many_tiny_lines_collapse_into_prose():
 
 def test_empty_page_yields_empty_description():
     assert p8.extract_description("<html><body><br id=comments></body></html>") == ""
+
+
+def test_script_style_textarea_comments_never_leak():
+    """The CodeQL py/bad-tag-filter case: regex tag filtering is bypassable
+    (e.g. `</script >`), so containers must be dropped structurally."""
+    html = """<html><body>
+      <script>var evil = "alert(1)";</script>
+      <script>var evil2 = "alert(2)";</script >
+      <style>body { color: red }</style>
+      <textarea><iframe src="x"></iframe></textarea>
+      <!-- nasty comment mentioning </script > -->
+      <p>the real description</p>
+      <br id=comments>
+      <p>a comment from someone else</p>
+    </body></html>"""
+    desc = p8.extract_description(html)
+    assert "the real description" in desc
+    assert "alert" not in desc
+    assert "color: red" not in desc
+    assert "iframe" not in desc
+    assert "nasty comment" not in desc
+    assert "a comment from someone else" not in desc
+
+
+def test_charrefs_still_unescaped():
+    html = "<p>caf&#233; &#38; tea</p><br id=comments>"
+    desc = p8.extract_description(html)
+    assert desc == "café & tea"
