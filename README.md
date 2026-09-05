@@ -76,6 +76,13 @@ this:
 3. **On demand** — when a game is picked, its BBS page is fetched once for
    the description and its cover is downloaded once; both are cached forever.
 
+## Architecture
+
+Diagrams live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): a component
+map of the widget (UI, helper, local data, the BBS), a sequence diagram of a
+day in its life, and the CI quality gates — each annotated with a real bug
+that layer caught.
+
 ## Data & storage
 
 All persistent state lives under your XDG data dir in
@@ -215,6 +222,7 @@ manifest.json       plugin manifest (id: guy.pico-8-widget, kind: bar-widget)
 Pico8Games.qml      bar icon + popup (Omarchy Panel / Quickshell QML)
 p8.py               data helper (python3, stdlib only) — fetch, pick, cache
 pyproject.toml      mutmut (mutation testing) configuration
+docs/ARCHITECTURE.md  component, sequence and CI-gate diagrams
 tests/              offline unit tests + BBS fixtures (see "Testing & CI")
 tools/crap_gate.py  CRAP metric gate for CI
 tools/mutation_gate.py  mutation-score gate for CI
