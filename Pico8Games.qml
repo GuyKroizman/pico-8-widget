@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Ui
 import qs.Commons
+import "JobQueue.js" as JobQueue
 
 // PICO-8 Widget - a daily PICO-8 game in the bar.
 //
@@ -11,10 +12,11 @@ import qs.Commons
 //   left click  -> popup with today's game: cover, title, description,
 //                  an "Open in browser" link, bookmark (heart) and
 //                  "roll another" (circle-arrow)
-//   right click -> the bookmarked games list
+//   right click -> the bookmarked games list (a "Saved" button in the
+//                  popup does the same)
 //
-// All data work happens in p8.py (fetched through the one Process below and
-// serialized through a small job queue); this file is stateless UI only.
+// All data work happens in p8.py, driven through the serialized job queue in
+// JobQueue.js (pure logic, tested in Node); this file is UI + side effects.
 // User data lives in ~/.local/share/guy.pico-8-widget/. See README.md.
 
 Panel {
@@ -62,49 +64,28 @@ Panel {
     return path
   }
 
-  // One Process serves every request. Jobs queue up because Quickshell's
-  // Process can only run one command at a time (a running Process cannot be
-  // re-run); each job carries the argv plus a completion callback.
-  property var jobs: []
-  property var currentJob: null
-  property bool jobHandled: true
+  // One Process serves every request. The queueing, exit handling and output
+  // parsing live in JobQueue.js (pure JS, no Qt) so they are unit-testable
+  // outside Quickshell — see tests/jobqueue.test.mjs. This file only does the
+  // side effects: launching the Process and stopping timers.
+  property var queue: JobQueue.createJobQueue()
 
   function run(args, onDone) {
-    root.jobs.push({ args: args, done: onDone })
-    root.pump()
+    var decision = root.queue.enqueue(args, onDone)
+    if (decision && decision.start) root.startProcess(decision.command)
   }
 
-  function pump() {
-    if (p8Proc.running) return
-    if (!root.currentJob && root.jobs.length > 0) root.currentJob = root.jobs.shift()
-    if (!root.currentJob) return
-    root.jobHandled = false
-    p8Proc.command = root.currentJob.args
+  function startProcess(command) {
+    p8Proc.command = command
     p8Proc.running = true
     watchdog.restart()
   }
 
-  function finishCurrent(result) {
-    if (root.jobHandled) return
-    root.jobHandled = true
+  function finishJob(result) {
     watchdog.stop()
-    var callback = root.currentJob ? root.currentJob.done : null
-    root.currentJob = null
-    if (callback) callback(result)
-    root.pump()
-  }
-
-  // p8.py prints exactly one JSON object; take the last brace-initialized
-  // line so stray warnings above it are harmless.
-  function parseHelperOutput(text) {
-    var lines = String(text || "").split("\n")
-    for (var i = lines.length - 1; i >= 0; i--) {
-      var line = lines[i].trim()
-      if (line.charAt(0) === "{") {
-        try { return JSON.parse(line) } catch (e) { return null }
-      }
-    }
-    return null
+    collectorTimer.stop()
+    var next = root.queue.finishWith(result)
+    if (next && next.start) root.startProcess(next.command)
   }
 
   Process {
@@ -113,19 +94,37 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        if (!root.currentJob) return
-        var result = root.parseHelperOutput(text)
-        root.finishCurrent(result || { ok: false, error: "unreadable helper output" })
+        var decision = root.queue.onOutput(text)
+        if (decision && decision.finish) root.finishJob(decision.finish)
       }
     }
 
-    // Fire in every stop path so a job can never wedge the queue.
+    // A stop after a watchdog kill is a timeout. Natural stops are handled by
+    // onExited/onStreamFinished — never finish early on a normal stop.
     onRunningChanged: {
-      if (!running && !root.jobHandled) root.finishCurrent({ ok: false, error: "helper timed out" })
+      if (running) return
+      var decision = root.queue.onStopped()
+      if (decision && decision.finish) root.finishJob(decision.finish)
+      else if (decision && decision.waitForOutput) collectorTimer.restart()
     }
 
+    // Non-zero exit is a real failure. Exit 0 is NOT a finish: onStreamFinished
+    // may still deliver the parsed output (signal order is not guaranteed).
     onExited: function(exitCode) {
-      if (!root.jobHandled) root.finishCurrent({ ok: false, error: "helper exited " + exitCode })
+      var decision = root.queue.onExit(exitCode)
+      if (decision && decision.finish) root.finishJob(decision.finish)
+      else if (decision && decision.waitForOutput) collectorTimer.restart()
+    }
+  }
+
+  // If a helper exits 0 but the stdout collector never delivers its result
+  // (signal loss), don't leave the job stuck — fail it after a short grace.
+  Timer {
+    id: collectorTimer
+    interval: 2000
+    onTriggered: {
+      var decision = root.queue.onOutputGrace()
+      if (decision && decision.finish) root.finishJob(decision.finish)
     }
   }
 
@@ -136,7 +135,8 @@ Panel {
     id: watchdog
     interval: 60000
     onTriggered: {
-      if (p8Proc.running) p8Proc.running = false // onRunningChanged finishes the job
+      var decision = root.queue.onWatchdogFire()
+      if (decision && decision.kill && p8Proc.running) p8Proc.running = false
     }
   }
 
@@ -144,9 +144,6 @@ Panel {
   // data commands
   // ------------------------------------------------------------------
 
-  // Retry state for loadToday: failed lookups are retried a couple of times
-  // a few seconds apart so a single slow response doesn't surface as
-  // "offline" (the BBS occasionally stalls connections).
   // Retry state for loadToday: failed lookups are retried a couple of times
   // a few seconds apart so a single slow response doesn't surface as
   // "offline" (the BBS occasionally stalls connections). retryRoll is a var
@@ -316,16 +313,33 @@ Panel {
 
     tooltipText: root.busy ? "PICO-8…"
       : (root.message !== "" ? root.message
-        : (root.gameTitle !== "" ? root.gameTitle + " — PICO-8"
-          : "PICO-8 daily game"))
+        : (root.gameTitle !== "" ? root.gameTitle + " — PICO-8 · right-click: saved games"
+          : "PICO-8 — click for today's game, right-click for saved games"))
 
     onPressed: function(buttonPressed) {
       if (buttonPressed === Qt.RightButton) {
-        root.showFavorites = !root.showFavorites
-        root.toggle()
+        // Open the bookmarks list. (Only reachable while the popup is open -
+        // the popup's click-forwarding delivers the event; when closed, the
+        // rightProbe MouseArea below handles it.)
+        root.showFavorites = true
+        root.open()
       } else if (buttonPressed === Qt.LeftButton) {
         root.toggle()
       }
+    }
+  }
+
+  // Catches right-click on the icon while the popup is closed: the bar's own
+  // event routing swallows right-clicks on widgets when no panel is open, so
+  // an overlay that accepts only the right button sits on top. Left clicks
+  // pass through to the button below.
+  MouseArea {
+    anchors.fill: parent
+    acceptedButtons: Qt.RightButton
+    hoverEnabled: false
+    onClicked: {
+      root.showFavorites = true
+      root.open()
     }
   }
 
@@ -450,10 +464,12 @@ Panel {
           }
         }
 
-        // Actions: bookmark + roll another, left-aligned.
+        // Actions: bookmark, roll another, and a visible way to reach the
+        // saved-games list (right-click on the icon does the same).
         Row {
           width: parent.width
-          height: actionsRow.implicitHeight
+          height: Math.max(actionsRow.implicitHeight, savedButton.implicitHeight)
+          spacing: Style.spacing.controlGap
 
           Row {
             id: actionsRow
@@ -483,10 +499,23 @@ Panel {
             }
           }
 
-          // Right-side spacer keeps the actions left-aligned.
+          // Spacer keeps actions left and the Saved button right-aligned.
           Item {
-            width: parent.width - actionsRow.implicitWidth
+            width: Math.max(0, parent.width - actionsRow.implicitWidth
+                            - savedButton.implicitWidth - parent.spacing * 2)
             height: 1
+          }
+
+          Button {
+            id: savedButton
+            text: "Saved (" + root.favorites.length + ")"
+            foreground: root.barForeground
+            fontFamily: root.uiFontFamily
+            tooltipText: "Your saved games (right-click the icon also opens this)"
+            onClicked: {
+              root.showFavorites = true
+              root.refreshFavorites()
+            }
           }
         }
       }
@@ -539,13 +568,15 @@ Panel {
             Repeater {
               model: root.favorites
 
-              // One row per bookmark: tap anywhere to open, ✕ to remove.
-              delegate: Row {
+              // One bookmark row: tap anywhere to open the game, × removes it.
+              // An Item with anchors (not a Row) — MouseArea with anchors.fill
+              // inside a positioner breaks its layout.
+              delegate: Item {
                 required property var modelData
                 width: favList.width
                 height: Style.spacing.popupRowHeight
-                spacing: Style.spacing.controlGap
 
+                // Whole row opens the game.
                 MouseArea {
                   anchors.fill: parent
                   cursorShape: Qt.PointingHandCursor
@@ -559,17 +590,23 @@ Panel {
                   font.family: root.uiFontFamily
                   font.pixelSize: Style.font.body
                   elide: Text.ElideRight
-                  width: parent.width - removeButton.implicitWidth - parent.spacing
+                  anchors.left: parent.left
+                  anchors.right: removeButton.left
+                  anchors.rightMargin: Style.spacing.controlGap
                   anchors.verticalCenter: parent.verticalCenter
                 }
 
                 PanelActionButton {
                   id: removeButton
-                  iconText: "\u2715" // ✕
+                  iconText: "\u00d7" // × (widely supported; ✕ was missing from the font)
                   foreground: root.barForeground
+                  hoverColor: root.bar.urgent
                   fontFamily: root.uiFontFamily
-                  fontSize: Style.font.caption
+                  fontSize: Style.font.icon
+                  bordered: true
                   tooltipText: "Remove bookmark"
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
                   onClicked: root.removeFavorite(Number(modelData.tid))
                 }
               }

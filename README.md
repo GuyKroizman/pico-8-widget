@@ -174,16 +174,25 @@ tests/
   test_favorites.py      # bookmarks
   test_fetch.py          # retry + pacing behaviour
   test_cli.py            # command-line entry point
+  jobqueue.test.mjs      # JobQueue.js queue logic (Node, no Qt)
 ```
 
-Run everything locally (any python3 with pytest/pytest-cov/radon):
+Run everything locally (any python3 with pytest/pytest-cov/radon; Node for
+the JS tests):
 
 ```sh
-python -m pytest tests -q                        # the unit suite
+python -m pytest tests -q                        # the Python unit suite (63)
+node --test tests/jobqueue.test.mjs              # UI-glue logic tests (10)
 python -m pytest tests --cov=p8 --cov-report=term-missing -q   # coverage
 python -m pytest --cov=p8 --cov-report=json:coverage.json -q   # report for the gate
 python tools/crap_gate.py --threshold 30         # CRAP gate (exits non-zero on failure)
 ```
+
+The Python layer (`p8.py`) is fully covered by the offline suite. The QML
+widget itself cannot run headless, so its **pure logic is factored out** into
+`JobQueue.js` (queueing, exit/output interpretation — including the signal-
+ordering race that once made successful helper runs look like failures) and
+tested in Node; the QML file only performs side effects around it.
 
 **What the CRAP gate does:** CRAP (Change Risk Anti-Patterns) =
 `complexity² × (1 − coverage)³ + complexity`, per function. A function only
