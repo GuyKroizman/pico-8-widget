@@ -10,9 +10,12 @@ alike.
 
 Quick orientation before the diagrams:
 
-- **`Pico8Games.qml`** is the whole UI: the bar icon, the popup, the timers and
-  the retry logic. It is Quickshell QML and can only run inside the Omarchy
+- **`Pico8Games.qml`** is the UI: the bar icon, the popup, the timers and the
+  retry logic. It is Quickshell QML and can only run inside the Omarchy
   shell (a Wayland session) — which is why it is tested manually, not in CI.
+- **`JobQueue.js`** is the UI's pure logic: the serialized job queue and the
+  interpretation of process end-states (including the exit-0-before-output
+  signal race). It has no Qt dependencies and is unit-tested in Node.
 - **`p8.py`** is the stateless helper: all fetching, parsing, picking and
   bookkeeping. It is pure Python (stdlib only) and is what the CI test stack
   covers.
@@ -28,7 +31,7 @@ flowchart TB
         icon["Bar icon (gamepad glyph)"]
         popup["Popup panel — cover, title, description, actions"]
         timers["Timers — hourly refresh, retry after failure"]
-        queue["Job queue — one Process, serialized commands"]
+        queue["JobQueue.js — pure JS queue + exit logic (Node-tested)"]
         icon -->|"left/right click"| popup
         timers --> queue
         popup --> queue
@@ -135,7 +138,9 @@ sequenceDiagram
 
 Notes: opening the game launches the default browser with the game's BBS page
 via `xdg-open`. The QML layer talks to `p8.py` through a single serialized
-`Process` (Quickshell can run one command at a time), so commands queue.
+`Process` (Quickshell can run one command at a time); the queueing and
+process-end logic lives in `JobQueue.js`, so commands stay ordered and a
+helper that exits 0 before its output arrives is never misreported as failed.
 
 ---
 

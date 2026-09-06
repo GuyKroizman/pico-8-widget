@@ -229,6 +229,7 @@ on a real Omarchy box (see the reload notes above).
 ```
 manifest.json       plugin manifest (id: guy.pico-8-widget, kind: bar-widget)
 Pico8Games.qml      bar icon + popup (Omarchy Panel / Quickshell QML)
+JobQueue.js        pure-JS job queue for the QML layer (Node-tested)
 p8.py               data helper (python3, stdlib only) — fetch, pick, cache
 pyproject.toml      mutmut (mutation testing) configuration
 docs/ARCHITECTURE.md  component, sequence and CI-gate diagrams
