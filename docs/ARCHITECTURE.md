@@ -2,7 +2,7 @@
 
 This file explains how the PICO-8 Widget works, in pictures. It is aimed at
 people who want to understand or extend the plugin, humans and AI agents
-alike. The three diagrams are Mermaid and render natively on GitHub.
+alike.
 
 - [1. Component map](#1-component-map)
 - [2. A day in the life (sequence)](#2-a-day-in-the-life-sequence)
