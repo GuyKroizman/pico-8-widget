@@ -40,9 +40,9 @@ def test_fetch_retries_then_succeeds(monkeypatch):
             raise OSError("connection reset")
         return _Response(b"ok")
 
-    monkeypatch.setattr(p8.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(p8, "_urlopen", flaky)
     monkeypatch.setattr(p8.time, "sleep", lambda _s: None)  # no real waiting
-    assert p8.fetch("https://example.test/x") == b"ok"
+    assert p8.fetch("https://www.lexaloffle.com/x") == b"ok"
     assert calls["n"] == p8.REQUEST_RETRIES
 
 
@@ -53,10 +53,10 @@ def test_fetch_gives_up_after_retries(monkeypatch):
         calls["n"] += 1
         raise OSError("boom")
 
-    monkeypatch.setattr(p8.urllib.request, "urlopen", always_down)
+    monkeypatch.setattr(p8, "_urlopen", always_down)
     monkeypatch.setattr(p8.time, "sleep", lambda _s: None)
-    with pytest.raises(RuntimeError, match="GET https://example.test/x failed"):
-        p8.fetch("https://example.test/x")
+    with pytest.raises(RuntimeError, match="GET https://www.lexaloffle.com/x failed"):
+        p8.fetch("https://www.lexaloffle.com/x")
     assert calls["n"] == p8.REQUEST_RETRIES
 
 
@@ -71,10 +71,10 @@ def test_fetch_paces_requests(monkeypatch):
     def ok(request, timeout=None):
         return _Response(b"ok")
 
-    monkeypatch.setattr(p8.urllib.request, "urlopen", ok)
-    p8.fetch("https://example.test/a")
+    monkeypatch.setattr(p8, "_urlopen", ok)
+    p8.fetch("https://www.lexaloffle.com/a")
     # the second fetch right after the first must sleep to keep the gap
-    p8.fetch("https://example.test/b")
+    p8.fetch("https://www.lexaloffle.com/b")
     assert len(sleeps) == 1
     assert sleeps[0] >= 0.45
 
@@ -87,7 +87,7 @@ def _urlopen_for(monkeypatch, factory):
     def urlopen(request, timeout=None):
         return factory()
 
-    monkeypatch.setattr(p8.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(p8, "_urlopen", urlopen)
 
 
 def test_declared_oversized_response_refused_without_reading(monkeypatch):
@@ -101,7 +101,7 @@ def test_declared_oversized_response_refused_without_reading(monkeypatch):
 
     _urlopen_for(monkeypatch, make)
     with pytest.raises(RuntimeError, match="refused: declared"):
-        p8.fetch("https://example.test/big")
+        p8.fetch("https://www.lexaloffle.com/big")
     assert delivered == []  # the body was never touched
 
 
@@ -117,7 +117,7 @@ def test_chunked_oversized_response_aborted_at_cap(monkeypatch):
 
     _urlopen_for(monkeypatch, make)
     with pytest.raises(RuntimeError, match="exceeds limit"):
-        p8.fetch("https://example.test/huge", limit=limit)
+        p8.fetch("https://www.lexaloffle.com/huge", limit=limit)
     # every attempt aborts just past the cap; the retained/read amount stays
     # tiny compared to the 100 KB body
     assert sum(delivered) <= p8.REQUEST_RETRIES * (limit + 1)
@@ -132,7 +132,7 @@ def test_response_at_exact_limit_is_accepted(monkeypatch):
         return _Response(body=b"x" * limit, delivered=delivered)
 
     _urlopen_for(monkeypatch, make)
-    body = p8.fetch("https://example.test/exact", limit=limit)
+    body = p8.fetch("https://www.lexaloffle.com/exact", limit=limit)
     assert body == b"x" * limit
     assert sum(delivered) == limit
 
@@ -144,4 +144,42 @@ def test_small_chunked_body_below_limit_is_accepted(monkeypatch):
         return _Response(body=b"hello world", delivered=delivered)
 
     _urlopen_for(monkeypatch, make)
-    assert p8.fetch("https://example.test/small", limit=1000) == b"hello world"
+    assert p8.fetch("https://www.lexaloffle.com/small", limit=1000) == b"hello world"
+
+
+# ---------------------------------------------------------------------------
+# origin control (the widget must only ever talk to www.lexaloffle.com)
+# ---------------------------------------------------------------------------
+
+def test_fetch_refuses_off_origin_urls_without_connecting(monkeypatch):
+    delivered = []
+    _urlopen_for(monkeypatch, lambda: _Response(b"x", delivered=delivered))
+    bad_urls = [
+        "http://www.lexaloffle.com/x",            # wrong scheme
+        "https://evil.example.com/x",             # wrong host
+        "https://user:pass@www.lexaloffle.com/x", # embedded credentials
+        "https://www.lexaloffle.com:8443/x",      # unusual port
+        "file:///etc/passwd",                     # wrong scheme
+    ]
+    for url in bad_urls:
+        with pytest.raises(RuntimeError, match="off-origin"):
+            p8.fetch(url)
+    assert delivered == []  # nothing was ever connected to
+
+
+def test_off_origin_redirect_is_refused():
+    handler = p8._OriginRedirectHandler()
+    req = p8.urllib.request.Request("https://www.lexaloffle.com/a")
+    for target in ("https://evil.example.com/b",
+                   "https://user:pass@www.lexaloffle.com/b",
+                   "http://www.lexaloffle.com/b"):
+        with pytest.raises(RuntimeError, match="off-origin"):
+            handler.redirect_request(req, None, 302, "Found", {}, target)
+
+
+def test_same_origin_redirect_is_allowed():
+    handler = p8._OriginRedirectHandler()
+    req = p8.urllib.request.Request("https://www.lexaloffle.com/a")
+    result = handler.redirect_request(req, None, 302, "Found", {},
+                                      "https://www.lexaloffle.com/b")
+    assert isinstance(result, p8.urllib.request.Request)

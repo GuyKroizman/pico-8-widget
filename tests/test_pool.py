@@ -109,3 +109,33 @@ def test_ensure_thumb_failure_returns_empty(monkeypatch):
 
     monkeypatch.setattr(p8, "fetch", boom)
     assert p8.ensure_thumb({"tid": 7, "thumb": "/bbs/thumbs/pico8_x-0.png"}) == ""
+
+
+def test_ensure_thumb_refuses_unsafe_values(monkeypatch):
+    """Covers come from remote data, so only safe relative /bbs/thumbs/ paths
+    may ever reach the network."""
+
+    def boom(url, **kwargs):
+        raise AssertionError(f"fetch must never be called with {url!r}")
+
+    monkeypatch.setattr(p8, "fetch", boom)
+    bad = [
+        "https://evil.example.com/x.png",        # absolute off-origin URL
+        "http://www.lexaloffle.com/bbs/thumbs/x.png",
+        "//evil.example.com/bbs/thumbs/x.png",   # protocol-relative
+        "/bbs/thumbs/../../etc/passwd",          # traversal
+        "/bbs/thumbs/x.png?u=1",                 # query/fragment tricks
+        "/other/path.png",                       # not a thumbnail path
+        "x.png",                                 # not a path at all
+        "https://user:pass@www.lexaloffle.com/bbs/thumbs/x.png",
+    ]
+    for thumb in bad:
+        assert p8.ensure_thumb({"tid": 1, "thumb": thumb}) == ""
+    assert p8.ensure_thumb({"tid": 2, "thumb": ""}) == ""
+
+
+def test_ensure_thumb_accepts_real_lexaloffle_path(fake_fetch):
+    calls = fake_fetch(b"\x89PNG ok")
+    path = p8.ensure_thumb({"tid": 9, "thumb": "/bbs/thumbs/pico8_rockhound-4.png"})
+    assert path.endswith("thumbs/9.png")
+    assert calls == ["https://www.lexaloffle.com/bbs/thumbs/pico8_rockhound-4.png"]

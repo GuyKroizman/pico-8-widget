@@ -36,6 +36,7 @@ import random
 import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 from datetime import date
 
@@ -44,6 +45,8 @@ from datetime import date
 # ---------------------------------------------------------------------------
 
 BASE = "https://www.lexaloffle.com"
+ALLOWED_ORIGIN = "www.lexaloffle.com"   # the only host this helper may talk to
+THUMB_PATH_PREFIX = "/bbs/thumbs/"      # covers must be relative paths here
 LIST_URL = BASE + "/bbs/?cat=7&sub=3&mode=carts&orderby=lucky&page={page}"
 TID_URL = BASE + "/bbs/?tid={tid}"
 
@@ -142,15 +145,52 @@ def emit(obj):
 # network
 # ---------------------------------------------------------------------------
 
-def fetch(url, limit=MAX_PAGE_BYTES):
-    """GET with pacing, a UA header, retries, and a hard response-size cap.
+def _validate_url(url):
+    """Refuse any URL that is not an https URL on the allowed origin.
 
-    Bodies are read in bounded chunks and the request is aborted as soon as
-    the cap is crossed, so a remote server cannot make the helper buffer an
-    arbitrarily large (or endless) response in memory. A declared
-    Content-Length above the cap is refused before anything is read.
+    Blocks other schemes/hosts, embedded credentials and unusual ports both
+    for the initial request and for every redirect the helper would follow.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    allowed = (
+        parsed.scheme == "https"
+        and parsed.hostname == ALLOWED_ORIGIN
+        and parsed.username is None
+        and parsed.password is None
+        and (parsed.port is None or parsed.port == 443)
+    )
+    if not allowed:
+        raise RuntimeError(f"refusing off-origin URL: {url!r}")
+
+
+class _OriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow redirects only when the target stays on the allowed origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_url(newurl)  # raises RuntimeError on off-origin targets
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+# One opener for everything, so the origin check also applies to redirects.
+_OPENER = urllib.request.build_opener(_OriginRedirectHandler())
+
+
+def _urlopen(request, timeout=None):
+    """Open `request` through the origin-checked opener."""
+    return _OPENER.open(request, timeout=timeout)
+
+
+def fetch(url, limit=MAX_PAGE_BYTES):
+    """GET with pacing, a UA header, retries, origin checks and a size cap.
+
+    The URL must be on the allowed origin (validated before connecting, and
+    again for every redirect). Bodies are read in bounded chunks and the
+    request is aborted as soon as the cap is crossed, so a remote server
+    cannot make the helper buffer an arbitrarily large response in memory. A
+    declared Content-Length above the cap is refused before anything is read.
     """
     global _last_request_at
+    _validate_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
 
     for attempt in range(REQUEST_RETRIES):
@@ -159,7 +199,7 @@ def fetch(url, limit=MAX_PAGE_BYTES):
             time.sleep(wait)
         try:
             # Fixed https URLs only, from our own constants (B310 not applicable).
-            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:  # nosec B310
+            with _urlopen(request, timeout=REQUEST_TIMEOUT) as response:  # nosec B310
                 headers = getattr(response, "headers", None)
                 declared = headers.get("Content-Length") if headers is not None else None
                 if declared is not None:
@@ -537,14 +577,36 @@ def ensure_detail(pool, tid):
     return pool
 
 
+# Covers arrive as relative paths in the listing data; only a flat file name
+# under /bbs/thumbs/ is ever fetched. Anything else (absolute URLs, other
+# paths, traversal) is refused before a connection is made.
+_THUMB_RE = re.compile(
+    r"^/bbs/thumbs/[A-Za-z0-9_.\-]+\.(?:png|jpe?g|webp|gif)$", re.IGNORECASE)
+
+
+def _allowed_thumb_url(rel):
+    """Return the full https cover URL, or None if the value is not a safe,
+    relative thumbnail path from the listing."""
+    if not isinstance(rel, str):
+        return None
+    rel = rel.strip()
+    if not rel.lower().startswith(THUMB_PATH_PREFIX):
+        return None
+    if any(bad in rel for bad in ("..", "\\", "://", "?", "#")):
+        return None
+    if not _THUMB_RE.match(rel):
+        return None
+    return BASE + rel
+
+
 def ensure_thumb(entry):
     """Download the cover once; returns an absolute local path ("" on failure)."""
-    rel = entry.get("thumb") or ""
     path = os.path.join(thumbs_dir(), str(entry["tid"]) + ".png")
-    if not os.path.exists(path) and rel:
+    url = _allowed_thumb_url(entry.get("thumb") or "")
+    if not os.path.exists(path) and url:
         os.makedirs(thumbs_dir(), exist_ok=True)
         try:
-            body = fetch(BASE + rel if rel.startswith("/") else rel, limit=MAX_IMAGE_BYTES)
+            body = fetch(url, limit=MAX_IMAGE_BYTES)
             with open(path, "wb") as handle:
                 handle.write(body)
         except RuntimeError:
