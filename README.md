@@ -181,7 +181,7 @@ Run everything locally (any python3 with pytest/pytest-cov/radon; Node for
 the JS tests):
 
 ```sh
-python -m pytest tests -q                        # the Python unit suite (63)
+python -m pytest tests -q                        # the Python unit suite (67)
 node --test tests/jobqueue.test.mjs              # UI-glue logic tests (10)
 python -m pytest tests --cov=p8 --cov-report=term-missing -q   # coverage
 python -m pytest --cov=p8 --cov-report=json:coverage.json -q   # report for the gate
@@ -198,7 +198,7 @@ tested in Node; the QML file only performs side effects around it.
 `complexity² × (1 − coverage)³ + complexity`, per function. A function only
 scores over the default threshold of 30 when it is both complex *and*
 under-covered — so the gate pushes you to either simplify a function or
-cover it. Every function in `p8.py` currently passes with ~96% total line
+cover it. Every function in `p8.py` currently passes with ~95% total line
 coverage.
 
 **Mutation testing** (`.github/workflows/mutation.yml`): line coverage only

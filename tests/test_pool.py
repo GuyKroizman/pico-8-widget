@@ -104,7 +104,7 @@ def test_ensure_thumb_downloads_once(fake_fetch):
 
 
 def test_ensure_thumb_failure_returns_empty(monkeypatch):
-    def boom(url):
+    def boom(url, **kwargs):
         raise RuntimeError("no network")
 
     monkeypatch.setattr(p8, "fetch", boom)

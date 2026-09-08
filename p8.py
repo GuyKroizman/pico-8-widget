@@ -54,6 +54,14 @@ REQUEST_RETRIES = 2    # attempts per URL before giving up
 POOL_CAP = 2500        # max carts remembered at once
 RECENT_MAX = 30        # picks remembered so they are not repeated too soon
 DESC_MAX = 6000        # description length cap, in characters
+
+# Response size caps (the remote server controls these bodies, so they are
+# enforced while streaming — never buffered unbounded). BBS HTML pages run
+# ~80-250 KB and cover thumbs ~10-30 KB; the caps allow wide headroom while
+# keeping a runaway or malicious response from exhausting memory.
+CHUNK_SIZE = 64 * 1024
+MAX_PAGE_BYTES = 2 * 1024 * 1024     # listing + cart HTML pages
+MAX_IMAGE_BYTES = 1 * 1024 * 1024    # cover images
 LUCKY_PAGES = (1, 2)   # how many lucky pages to pull per refresh
 
 DATA_DIR = os.environ.get("P8_DATA_DIR") or os.path.join(
@@ -134,8 +142,14 @@ def emit(obj):
 # network
 # ---------------------------------------------------------------------------
 
-def fetch(url):
-    """GET with pacing, a UA header and a few gentle retries."""
+def fetch(url, limit=MAX_PAGE_BYTES):
+    """GET with pacing, a UA header, retries, and a hard response-size cap.
+
+    Bodies are read in bounded chunks and the request is aborted as soon as
+    the cap is crossed, so a remote server cannot make the helper buffer an
+    arbitrarily large (or endless) response in memory. A declared
+    Content-Length above the cap is refused before anything is read.
+    """
     global _last_request_at
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
 
@@ -146,9 +160,32 @@ def fetch(url):
         try:
             # Fixed https URLs only, from our own constants (B310 not applicable).
             with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:  # nosec B310
-                body = response.read()
-            _last_request_at = time.time()
-            return body
+                headers = getattr(response, "headers", None)
+                declared = headers.get("Content-Length") if headers is not None else None
+                if declared is not None:
+                    try:
+                        declared = int(declared)
+                    except (TypeError, ValueError):
+                        declared = None
+                    if declared is not None and declared > limit:
+                        raise RuntimeError(
+                            f"GET {url} refused: declared {declared} bytes > limit {limit}")
+
+                body = bytearray()
+                while True:
+                    # Never ask for more than the remaining budget (+1 byte so
+                    # an exact-limit body still terminates, and one extra byte
+                    # is enough to detect a cap violation).
+                    read_size = min(CHUNK_SIZE, limit - len(body) + 1)
+                    chunk = response.read(read_size)
+                    if not chunk:
+                        break
+                    body += chunk
+                    if len(body) > limit:
+                        raise RuntimeError(
+                            f"GET {url} refused: response exceeds limit {limit} bytes")
+                _last_request_at = time.time()
+                return bytes(body)
         except Exception as exc:  # noqa: BLE001 - keep the widget alive
             _last_request_at = time.time()
             if attempt == REQUEST_RETRIES - 1:
@@ -491,7 +528,7 @@ def ensure_thumb(entry):
     if not os.path.exists(path) and rel:
         os.makedirs(thumbs_dir(), exist_ok=True)
         try:
-            body = fetch(BASE + rel if rel.startswith("/") else rel)
+            body = fetch(BASE + rel if rel.startswith("/") else rel, limit=MAX_IMAGE_BYTES)
             with open(path, "wb") as handle:
                 handle.write(body)
         except RuntimeError:
@@ -637,10 +674,12 @@ def main():
         return 1
     command = args[0]
 
-    if command == "refresh":
-        emit(refresh_pool(force=False))
-    elif command == "refresh-now":
-        emit(refresh_pool(force=True))
+    if command in ("refresh", "refresh-now"):
+        try:
+            emit(refresh_pool(force=(command == "refresh-now")))
+        except RuntimeError as exc:
+            emit({"ok": False, "error": str(exc)})
+            return 1
     elif command == "pick":
         roll = None
         if "--roll" in args:

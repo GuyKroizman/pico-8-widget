@@ -60,7 +60,7 @@ def fake_fetch(monkeypatch):
     def install(body=b""):
         calls = []
 
-        def fetch(url):
+        def fetch(url, **kwargs):
             calls.append(url)
             if callable(body):
                 return body(url)

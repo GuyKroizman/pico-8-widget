@@ -152,8 +152,8 @@ during development.
 
 ```mermaid
 flowchart LR
-    A["Unit tests — 73 offline (63 Python + 10 UI-glue JS), network mocked<br/>caught: WIP filter rejecting 'Wipeout Racers'"]
-    B["Coverage — ~96% lines<br/>proves the tests actually ran the code"]
+    A["Unit tests — 77 offline (67 Python + 10 UI-glue JS), network mocked<br/>caught: WIP filter rejecting 'Wipeout Racers'"]
+    B["Coverage — ~95% lines<br/>proves the tests actually ran the code"]
     C["CRAP gate — complexity vs. coverage per function"]
     D["Mutation testing — ~1,150 mutants, CI gate &gt;= 75%<br/>caught: HTML comments leaking into popup text"]
     E["Security — Bandit + CodeQL<br/>caught: bypassable HTML-stripping regex"]
