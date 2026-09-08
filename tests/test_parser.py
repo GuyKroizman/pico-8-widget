@@ -60,6 +60,19 @@ def test_parse_missing_blob_returns_empty():
     assert p8.parse_pdat("<html>no data here</html>") == []
 
 
+def test_pathological_nesting_returns_empty_not_crash():
+    """A hostile page of deeply nested brackets must not blow the call stack;
+    it is treated as 'no carts on this page' instead."""
+    html = "pdat=[" + "[" * 20000 + "]" * 20000 + "];"
+    assert p8.parse_pdat(html) == []
+
+
+def test_legitimately_nested_rows_still_parse():
+    # nesting far below the cap is unaffected (row array > tags array)
+    rows = p8.parse_pdat(fixture("listing.html"))
+    assert len(rows) == 4
+
+
 def test_parse_nested_tag_array():
     html = "pdat=[ ['1', 2, `t`,\"\",0,0,\"\",0,0,\"\",0,\"\",0,0,0,7,2,'0',[\"wip\",\"raycast\"],2,21,7,`x`,``] ];"
     rows = p8.parse_pdat(html)

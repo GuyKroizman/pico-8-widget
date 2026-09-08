@@ -250,13 +250,26 @@ def _string(s, i):
     return "".join(out), i
 
 
-def _value(s, i):
+# Maximum array nesting the parser will descend into. Real pdat rows are
+# shallow (a row array containing a small tags array); bounding the depth
+# turns a hostile page full of "[[[[..." into a clean "no rows" result
+# instead of a RecursionError crash.
+MAX_PARSE_DEPTH = 64
+
+
+class _ParseError(ValueError):
+    """Raised when the pdat blob is structurally abusive (too deep, etc.)."""
+
+
+def _value(s, i, depth=0):
     """Parse one value: an array, a string, or a bare token."""
     i = _skip(s, i)
     if i >= len(s):
         return None, i
     char = s[i]
     if char == "[":
+        if depth >= MAX_PARSE_DEPTH:
+            raise _ParseError("pdat nesting too deep")
         i += 1
         arr = []
         while True:
@@ -265,7 +278,7 @@ def _value(s, i):
                 break
             if s[i] == "]":
                 return arr, i + 1
-            value, i = _value(s, i)
+            value, i = _value(s, i, depth + 1)
             arr.append(value)
             i = _skip(s, i)
             if i < len(s) and s[i] == ",":
@@ -282,7 +295,10 @@ def parse_pdat(html_text):
     start = html_text.find("pdat=[")
     if start < 0:
         return []
-    rows, _ = _value(html_text, start + 5)  # index of the '[' opening the array
+    try:
+        rows, _ = _value(html_text, start + 5)  # the '[' opening the array
+    except _ParseError:
+        return []  # abusive structure -> treat as "no carts on this page"
     return rows if isinstance(rows, list) else []
 
 
